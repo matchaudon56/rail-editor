@@ -217,7 +217,7 @@ function svgText() {
   const W = 1240, H = 460, x0 = 90, x1 = 1150, y = 210;
   const xs = state.stations.map((s, i) => total > 0 ? x0 + (x1 - x0) * (cum[i] / total) : x0 + i * 120);
   let g = '<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg" width="' + W + '" height="' + H + '" viewBox="0 0 ' + W + ' ' + H + '">';
-  g += "<style>text{font-family:'Hiragino Kaku Gothic ProN','Noto Sans JP',sans-serif;fill:#222}.t{font-size:30px;font-weight:700}.st{font-size:21px;font-weight:700}.sm{font-size:12px;fill:#666}</style>";
+  g += "<style>text{font-family:'Yu Gothic','YuGothic','Meiryo','Hiragino Kaku Gothic ProN','Noto Sans JP',sans-serif;fill:#222}.t{font-size:30px;font-weight:700}.st{font-size:21px;font-weight:700}.sm{font-size:12px;fill:#666}</style>";
   g += '<rect width="' + W + '" height="' + H + '" fill="#fff"/>';
   g += '<text x="50" y="60" class="t">' + state.name + "</text>";
   g += '<text x="50" y="88" class="sm">全長 ' + fmt(total) + " km ・ 駅数 " + state.stations.length + " ・ 所要 約 " + Math.round(total / state.speed * 60) + " 分（表定 " + state.speed + " km/h）</text>";
