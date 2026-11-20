@@ -200,7 +200,7 @@ function yamlText() {
   });
   return y;
 }
-$("dlYaml").addEventListener("click", () => download(state.name + ".yaml", yamlText()));
+$("dlYaml").addEventListener("click", () => download(state.name + ".yaml", "\uFEFF" + yamlText()));
 $("dlJson").addEventListener("click", () => download(state.name + ".json", JSON.stringify(state, null, 2), "application/json"));
 $("loadJson").addEventListener("click", () => $("fileJson").click());
 $("fileJson").addEventListener("change", e => {
@@ -216,7 +216,7 @@ function svgText() {
   const total = cum.length ? cum[cum.length - 1] : 0;
   const W = 1240, H = 460, x0 = 90, x1 = 1150, y = 210;
   const xs = state.stations.map((s, i) => total > 0 ? x0 + (x1 - x0) * (cum[i] / total) : x0 + i * 120);
-  let g = '<svg xmlns="http://www.w3.org/2000/svg" width="' + W + '" height="' + H + '" viewBox="0 0 ' + W + ' ' + H + '">';
+  let g = '<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg" width="' + W + '" height="' + H + '" viewBox="0 0 ' + W + ' ' + H + '">';
   g += "<style>text{font-family:'Hiragino Kaku Gothic ProN','Noto Sans JP',sans-serif;fill:#222}.t{font-size:30px;font-weight:700}.st{font-size:21px;font-weight:700}.sm{font-size:12px;fill:#666}</style>";
   g += '<rect width="' + W + '" height="' + H + '" fill="#fff"/>';
   g += '<text x="50" y="60" class="t">' + state.name + "</text>";
@@ -231,7 +231,7 @@ function svgText() {
   g += '<text x="50" y="' + (H - 24) + '" class="sm">※ 距離は設計値（直線距離×迂回率 ' + state.factor + "）</text></svg>";
   return g;
 }
-$("dlSvg").addEventListener("click", () => download(state.name + "_路線図.svg", svgText(), "image/svg+xml"));
+$("dlSvg").addEventListener("click", () => download(state.name + "_路線図.svg", svgText(), "image/svg+xml;charset=utf-8"));
 
 const SAMPLE = {
   name: "山陽空港線", color: "#E6007E", speed: 110, factor: 1.13,
