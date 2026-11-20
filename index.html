@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>路線エディタ</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: 'Hiragino Kaku Gothic ProN','Noto Sans JP',sans-serif; display: flex; flex-direction: column; height: 100vh; }
+  header { padding: 8px 12px; background: #222; color: #fff; display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; }
+  header .ttl { font-weight: 700; font-size: 16px; }
+  header label { font-size: 12px; color: #ccc; }
+  header input[type=text] { font-size: 14px; padding: 3px 6px; border-radius: 4px; border: none; }
+  header input[type=number] { width: 64px; font-size: 14px; padding: 3px 6px; border-radius: 4px; border: none; }
+  header input[type=color] { width: 36px; height: 24px; border: none; background: none; }
+  main { flex: 1; display: flex; min-height: 0; }
+  #map { flex: 1; }
+  aside { width: 300px; border-left: 1px solid #ddd; display: flex; flex-direction: column; background: #fafafa; }
+  aside .sum { padding: 10px 12px; border-bottom: 1px solid #e3e3e3; font-size: 13px; line-height: 1.7; }
+  aside .sum b { font-size: 15px; }
+  #stations { flex: 1; overflow-y: auto; padding: 8px; }
+  .st { background: #fff; border: 1px solid #ddd; border-radius: 8px; padding: 6px 8px; margin-bottom: 6px; display: flex; align-items: center; gap: 6px; }
+  .st.sel { border-color: #333; box-shadow: 0 0 0 1px #333; }
+  .st .no { font-size: 11px; color: #fff; border-radius: 50%; width: 20px; height: 20px; line-height: 20px; text-align: center; flex: none; }
+  .st input { flex: 1; min-width: 0; font-size: 14px; border: none; border-bottom: 1px solid #ccc; padding: 2px; }
+  .st .km { font-size: 11px; color: #666; white-space: nowrap; }
+  .st button { border: none; background: #eee; border-radius: 4px; cursor: pointer; font-size: 12px; padding: 3px 6px; }
+  .seg { font-size: 11px; color: #888; text-align: center; margin: -2px 0 4px; }
+  footer { padding: 8px; border-top: 1px solid #e3e3e3; display: flex; flex-wrap: wrap; gap: 6px; }
+  footer button { flex: 1; min-width: 120px; padding: 9px 4px; font-size: 13px; border: 1px solid #bbb; background: #fff; border-radius: 8px; cursor: pointer; }
+  footer button.primary { background: #222; color: #fff; border-color: #222; }
+  .mode { padding: 8px 12px; font-size: 12px; background: #fff8e1; border-bottom: 1px solid #e3e3e3; }
+  .mode button { font-size: 12px; padding: 4px 10px; border-radius: 12px; border: 1px solid #bbb; background: #fff; cursor: pointer; }
+  .mode button.on { background: #ffb300; border-color: #ffb300; font-weight: 700; }
+  @media (max-width: 760px) { aside { width: 46vw; } }
+</style>
+</head>
+<body>
+<header>
+  <span class="ttl">路線エディタ</span>
+  <label>路線名 <input type="text" id="lineName" value="新しい路線"></label>
+  <label>色 <input type="color" id="lineColor" value="#E6007E"></label>
+  <label>表定速度 <input type="number" id="lineSpeed" value="75" min="10" max="300"> km/h</label>
+  <label>迂回率 <input type="number" id="lineFactor" value="1.13" step="0.01" min="1" max="2"></label>
+</header>
+<main>
+  <div id="map"></div>
+  <aside>
+    <div class="mode">
+      <button id="addMode" class="on">駅追加モード：ON</button>
+      <span>地図をクリックで駅を追加。駅はドラッグで移動できます</span>
+    </div>
+    <div class="sum" id="summary">駅を置いてください</div>
+    <div id="stations"></div>
+    <footer>
+      <button id="dlYaml" class="primary">YAMLを保存</button>
+      <button id="dlSvg" class="primary">路線図SVGを保存</button>
+      <button id="dlJson">データを保存(JSON)</button>
+      <button id="loadJson">データを開く</button>
+      <input type="file" id="fileJson" accept=".json,application/json" style="display:none">
+      <button id="loadSample">サンプル（山陽空港線）</button>
+      <button id="clearAll">全消去</button>
+    </footer>
+  </aside>
+</main>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+let state = { name: "新しい路線", color: "#E6007E", speed: 75, factor: 1.13, stations: [] };
+let addMode = true, selected = -1;
+let markers = [], polyline = null;
+
+const map = L.map("map").setView([34.62, 133.80], 11);
+L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+  maxZoom: 19, attribution: "&copy; OpenStreetMap contributors"
+}).addTo(map);
+
+function haversine(a, b, c, d) {
+  const R = 6371.0, p1 = a * Math.PI / 180, p2 = c * Math.PI / 180;
+  const dp = (c - a) * Math.PI / 180, dl = (d - b) * Math.PI / 180;
+  const x = Math.sin(dp / 2) ** 2 + Math.cos(p1) * Math.cos(p2) * Math.sin(dl / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(x));
+}
+function segments() {
+  const segs = [];
+  for (let i = 0; i + 1 < state.stations.length; i++) {
+    const s = state.stations[i], t = state.stations[i + 1];
+    segs.push(haversine(s.lat, s.lon, t.lat, t.lon) * state.factor);
+  }
+  return segs;
+}
+function cumulative() {
+  const segs = segments(), cum = [0];
+  segs.forEach(d => cum.push(cum[cum.length - 1] + d));
+  return cum;
+}
+function fmt(n) { return (Math.round(n * 10) / 10).toFixed(1); }
+
+function saveLocal() { try { localStorage.setItem("rail-editor", JSON.stringify(state)); } catch (e) {} }
+function loadLocal() {
+  try {
+    const s = localStorage.getItem("rail-editor");
+    if (s) { state = JSON.parse(s); return true; }
+  } catch (e) {}
+  return false;
+}
+
+function render() {
+  $("lineName").value = state.name;
+  $("lineColor").value = state.color;
+  $("lineSpeed").value = state.speed;
+  $("lineFactor").value = state.factor;
+  markers.forEach(m => map.removeLayer(m));
+  markers = [];
+  if (polyline) { map.removeLayer(polyline); polyline = null; }
+  state.stations.forEach((s, i) => {
+    const icon = L.divIcon({
+      className: "",
+      html: '<div style="background:' + state.color + ';color:#fff;border:2px solid #fff;border-radius:50%;width:22px;height:22px;line-height:19px;text-align:center;font-size:11px;font-weight:700;box-shadow:0 1px 4px rgba(0,0,0,.4)">' + (i + 1) + "</div>",
+      iconSize: [22, 22], iconAnchor: [11, 11]
+    });
+    const m = L.marker([s.lat, s.lon], { draggable: true, icon }).addTo(map);
+    m.bindTooltip(s.name, { direction: "top", offset: [0, -12] });
+    m.on("dragend", () => { const p = m.getLatLng(); s.lat = p.lat; s.lon = p.lng; render(); });
+    m.on("click", () => { selected = i; renderPanel(); });
+    markers.push(m);
+  });
+  if (state.stations.length > 1) {
+    polyline = L.polyline(state.stations.map(s => [s.lat, s.lon]), { color: state.color, weight: 6, opacity: 0.85 }).addTo(map);
+  }
+  renderPanel();
+  saveLocal();
+}
+
+function renderPanel() {
+  const segs = segments(), cum = cumulative();
+  const total = cum.length ? cum[cum.length - 1] : 0;
+  const mins = state.speed > 0 ? total / state.speed * 60 : 0;
+  $("summary").innerHTML = state.stations.length
+    ? "<b>" + state.name + "</b>　全長 <b>" + fmt(total) + " km</b>　所要 約 <b>" + Math.round(mins) + " 分</b>（表定 " + state.speed + " km/h）<br>駅数 " + state.stations.length
+    : "駅を置いてください";
+  const box = $("stations");
+  box.innerHTML = "";
+  state.stations.forEach((s, i) => {
+    const div = document.createElement("div");
+    div.className = "st" + (i === selected ? " sel" : "");
+    div.innerHTML = '<span class="no" style="background:' + state.color + '">' + (i + 1) + '</span>' +
+      '<input type="text" value="' + s.name.replace(/"/g, "&quot;") + '">' +
+      '<span class="km">' + fmt(cum[i]) + " km</span>" +
+      "<button data-act='up'>↑</button><button data-act='down'>↓</button><button data-act='del'>✕</button>";
+    div.querySelector("input").addEventListener("change", e => { s.name = e.target.value; render(); });
+    div.querySelectorAll("button").forEach(b => b.addEventListener("click", () => {
+      const act = b.dataset.act;
+      if (act === "del") state.stations.splice(i, 1);
+      if (act === "up" && i > 0) { const t = state.stations[i - 1]; state.stations[i - 1] = s; state.stations[i] = t; }
+      if (act === "down" && i + 1 < state.stations.length) { const t = state.stations[i + 1]; state.stations[i + 1] = s; state.stations[i] = t; }
+      render();
+    }));
+    div.addEventListener("click", () => { selected = i; renderPanel(); });
+    box.appendChild(div);
+    if (i < segs.length) {
+      const sd = document.createElement("div");
+      sd.className = "seg";
+      sd.textContent = "↓ " + fmt(segs[i]) + " km ・ 約 " + Math.max(1, Math.round(segs[i] / state.speed * 60)) + " 分";
+      box.appendChild(sd);
+    }
+  });
+}
+
+map.on("click", e => {
+  if (!addMode) return;
+  state.stations.push({ name: "駅" + (state.stations.length + 1), lat: e.latlng.lat, lon: e.latlng.lng });
+  selected = state.stations.length - 1;
+  render();
+});
+$("addMode").addEventListener("click", () => {
+  addMode = !addMode;
+  $("addMode").textContent = "駅追加モード：" + (addMode ? "ON" : "OFF");
+  $("addMode").className = addMode ? "on" : "";
+});
+$("lineName").addEventListener("change", e => { state.name = e.target.value; renderPanel(); saveLocal(); });
+$("lineColor").addEventListener("change", e => { state.color = e.target.value; render(); });
+$("lineSpeed").addEventListener("change", e => { state.speed = parseFloat(e.target.value) || 75; renderPanel(); saveLocal(); });
+$("lineFactor").addEventListener("change", e => { state.factor = parseFloat(e.target.value) || 1.13; render(); });
+
+function download(filename, text, type) {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([text], { type: type || "text/plain;charset=utf-8" }));
+  a.download = filename;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+}
+function yamlText() {
+  const cum = cumulative();
+  let y = "line: " + state.name + "\ncolor: \"" + state.color + "\"\nspeed_kmh: " + state.speed + "\nstations:\n";
+  state.stations.forEach((s, i) => {
+    y += "  - name: " + s.name + "\n    km: " + fmt(cum[i]) + "\n    lat: " + s.lat.toFixed(6) + "\n    lon: " + s.lon.toFixed(6) + "\n";
+  });
+  return y;
+}
+$("dlYaml").addEventListener("click", () => download(state.name + ".yaml", yamlText()));
+$("dlJson").addEventListener("click", () => download(state.name + ".json", JSON.stringify(state, null, 2), "application/json"));
+$("loadJson").addEventListener("click", () => $("fileJson").click());
+$("fileJson").addEventListener("change", e => {
+  const f = e.target.files[0];
+  if (!f) return;
+  f.text().then(t => { state = JSON.parse(t); selected = -1; render(); if (state.stations.length) map.fitBounds(state.stations.map(s => [s.lat, s.lon]), { padding: [40, 40] }); });
+});
+$("clearAll").addEventListener("click", () => { if (confirm("全部消しますか？")) { state.stations = []; selected = -1; render(); } });
+$("loadSample").addEventListener("click", () => { state = JSON.parse(JSON.stringify(SAMPLE)); selected = -1; render(); map.fitBounds(state.stations.map(s => [s.lat, s.lon]), { padding: [40, 40] }); });
+
+function svgText() {
+  const cum = cumulative(), segs = segments();
+  const total = cum.length ? cum[cum.length - 1] : 0;
+  const W = 1240, H = 460, x0 = 90, x1 = 1150, y = 210;
+  const xs = state.stations.map((s, i) => total > 0 ? x0 + (x1 - x0) * (cum[i] / total) : x0 + i * 120);
+  let g = '<svg xmlns="http://www.w3.org/2000/svg" width="' + W + '" height="' + H + '" viewBox="0 0 ' + W + ' ' + H + '">';
+  g += "<style>text{font-family:'Hiragino Kaku Gothic ProN','Noto Sans JP',sans-serif;fill:#222}.t{font-size:30px;font-weight:700}.st{font-size:21px;font-weight:700}.sm{font-size:12px;fill:#666}</style>";
+  g += '<rect width="' + W + '" height="' + H + '" fill="#fff"/>';
+  g += '<text x="50" y="60" class="t">' + state.name + "</text>";
+  g += '<text x="50" y="88" class="sm">全長 ' + fmt(total) + " km ・ 駅数 " + state.stations.length + " ・ 所要 約 " + Math.round(total / state.speed * 60) + " 分（表定 " + state.speed + " km/h）</text>";
+  g += '<polyline points="' + xs.map((x, i) => x + "," + y).join(" ") + '" fill="none" stroke="' + state.color + '" stroke-width="9" stroke-linejoin="round"/>';
+  state.stations.forEach((s, i) => {
+    g += '<circle cx="' + xs[i] + '" cy="' + y + '" r="11" fill="#fff" stroke="' + state.color + '" stroke-width="5"/>';
+    g += '<text x="' + xs[i] + '" y="' + (y - 34) + '" class="st" text-anchor="middle">' + s.name + "</text>";
+    g += '<text x="' + xs[i] + '" y="' + (y + 42) + '" class="sm" text-anchor="middle">' + fmt(cum[i]) + " km</text>";
+    if (i < segs.length) g += '<text x="' + ((xs[i] + xs[i + 1]) / 2) + '" y="' + (y - 14) + '" class="sm" text-anchor="middle">' + fmt(segs[i]) + " km</text>";
+  });
+  g += '<text x="50" y="' + (H - 24) + '" class="sm">※ 距離は設計値（直線距離×迂回率 ' + state.factor + "）</text></svg>";
+  return g;
+}
+$("dlSvg").addEventListener("click", () => download(state.name + "_路線図.svg", svgText(), "image/svg+xml"));
+
+const SAMPLE = {
+  name: "山陽空港線", color: "#E6007E", speed: 110, factor: 1.13,
+  stations: [
+    { name: "岡山", lat: 34.6664, lon: 133.9186 },
+    { name: "倉敷", lat: 34.6280, lon: 133.7720 },
+    { name: "浅口", lat: 34.5270, lon: 133.5850 },
+    { name: "里庄", lat: 34.5130, lon: 133.5580 },
+    { name: "山陽国際空港", lat: 34.4350, lon: 133.5450 }
+  ]
+};
+
+if (!loadLocal() || !state.stations || !state.stations.length) {
+  state = JSON.parse(JSON.stringify(SAMPLE));
+}
+render();
+if (state.stations.length) map.fitBounds(state.stations.map(s => [s.lat, s.lon]), { padding: [40, 40] });
+</script>
+</body>
+</html>
